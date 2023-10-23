@@ -1,6 +1,6 @@
 % The following matrix implements the SIR dynamics example from Chapter 9.3
 % of the textbook.
-A = [0.95 0.04 0 0; 0.05 0.85 0 0; 0 0.1 1 0; 0 0.01 0 1];
+A = [0.95 0.04 0 0; 0.05 0.85 0.05 0; 0 0.1 .95 0; 0 0.01 0 1];
 
 % The following matrix is needed to use the lsim function to simulate the
 % system in question
