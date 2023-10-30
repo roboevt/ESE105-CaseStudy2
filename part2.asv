@@ -38,66 +38,119 @@ title("Omicron Cases")
 xlabel("Date")
 ylabel("Cases")
 
-% DELTA SIRD Model
-
-deltaA = [0.95 0.04 0.01 0; 
-    0.05 0.85 0.01 0; 
-    0 0.1 0.98 0; 
-    0 0.01 0 1];
-
-delta0 = [1-delta_prop(1) delta_prop(1) 0 0];
+% ---------- DELTA SIRD Model ----------
 
 % Needed for lsim
-deltaB = zeros(4,1); 
+B = zeros(4,1); 
 
-closure = @(deltaA) objective_function(deltaA, deltaB, delta_cases_prop, delta_deaths_prop, delta0);
+% ----- Initial guesses -----
+% Rates
+ki = 0.05; % Infection rate
+kr = 0.5; % Recovery rate
+kd = 0.01; % Death rate
 
-% Define the lower and upper bounds for A
-lb = ones(4, 4)*0.00000;
-ub = ones(4, 4)*0.99999;
+% Initial conditions
+S0 = .9;
+I0 = .05;
+R0 = .05;
+D0 = .1;
 
-% Ensure that the sum of every row and column of A is 1
+deltaStart = [ki kr kd S0 I0 R0 D0];
 
-AeqHelper = [1 0 0 0 1 0 0 0 1 0 0 0 1]; %Extract a row
+% ----- Constraints -----
+lb = zeros(1,length(deltaStart)); % Lower bound
+ub = ones(1,length(deltaStart)); % Upper bound
 
-Aeq = [ones(1,4) zeros(1,12);           %First column
-       zeros(1,4) ones(1,4) zeros(1,8); %Second column
-       zeros(1,8) ones(1,4) zeros(1,4); %Third Column
-       zeros(1,12) ones(1,4);           % Fourth Column
-       AeqHelper 0 0 0;    %First row
-       0 AeqHelper 0 0;    %Second row
-       0 0 AeqHelper 0;    %Third row
-       0 0 0 AeqHelper; ]; %Fourth row
+% 0 leq 1-(S0+I0+R0) leq 1
+Aeq = [0 0 0 -1 -1 -1 0;
+       0 0 0 1 1 1 0
+       0 1 1 0 0 0 0];
+beq = [2; 1; 1];
 
-Beq = ones(1,16); %All sum to 1
+% Aeq = [0 0 0 1 1 1];
+% beq = [1];
+
+% ----- Optimization -----
+
+% Capture local variables and allow multiple lines in objective function
+deltaClosure = @(deltaA) objective_function(deltaA, delta_cases_prop, delta_deaths_prop);
 
 % Display fmincon progress
 % options = optimoptions('fmincon', 'Display', 'iter');
 
 % Perform the optimization
-delta_optimal = fmincon(closure, deltaA, [], [], Aeq, beq, lb, ub, [], options);
+delta_optimal = fmincon(deltaClosure, deltaStart, [], [], Aeq, beq, lb, []);
 
-delta_sys_sir_base = ss(delta_optimal,deltaB,eye(4),zeros(4,1),1);
-deltaTotalModel = lsim(delta_sys_sir_base,zeros(16,1),linspace(0,15,16),delta0);
-deltaModeldCumulative = cumsum(deltaTotalModel(:,2)*POP_STL)';
+% ----- Results -----
+
+% Extract optimization results
+ki = delta_optimal(1);
+kr = delta_optimal(2);
+kd = delta_optimal(3);
+S0 = delta_optimal(4);
+I0 = delta_optimal(5);
+R0 = delta_optimal(6);
+D0 = delta_optimal(7);
+
+% Create LTI
+A = [1-ki 0 0 0;
+     ki 1-(kd+kr) 0 0;
+     0 kr 1 0;
+     0 kd 0 1];
+initialState = [S0 I0 R0 D0];
+
+% Run the optimized model
+delta_sys_sir_base = ss(A,B,eye(4),zeros(4,1),1);
+deltaTotalModel = lsim(delta_sys_sir_base,zeros(16,1),linspace(0,15,16),initialState);
+
+% Convert to form of real world data
+deltaModeldCumulativeCases = (1-S0)+cumsum(ki*deltaTotalModel(:,1))';
 
 figure
-plot(delta_dates, deltaModeldCumulative);
+plot(delta_dates, deltaModeldCumulativeCases);
 hold on
-plot(delta_dates, delta_cases)
+plot(delta_dates, delta_cases_prop);
 title("Modeled vs. Actual Covid Cases")
 legend("Model", "Actual")
 xlabel("Date")
 ylabel("Total Cases")
 
+figure
+plot(delta_dates, deltaTotalModel(:,4));
+hold on
+plot(delta_dates, delta_deaths_prop);
+legend("Model", "Actual")
 
 
-function error = objective_function(A, B, actualCases, actualDeaths, delta0) 
-    sys_sir_base = ss(A, B, eye(4), zeros(4,1),1);
-    modeled = lsim(sys_sir_base, zeros(16,1),linspace(0,16-1,16),delta0);
-    modeledCumulativeCases = cumsum(modeled(:,2))';
-    modeledCumulativeDeaths = cumsum(modeled(:,4))';
-    infectionSum = sum((modeledCumulativeCases-actualCases).^2);
-    deathSum = sum((modeledCumulativeDeaths-actualDeaths).^2);
-    error = infectionSum+deathSum;
+
+function error = objective_function(input, actualCases, actualDeaths) 
+    % Extract and name inputs
+    ki = input(1);
+    kr = input(2);
+    kd = input(3);
+    S0 = input(4);
+    I0 = input(5);
+    R0 = input(6);
+    D0 = input(7);
+    
+    % Create LTI
+    A = [1-ki 0 0 0;
+         ki 1-(kd+kr) 0 0;
+         0 kr 1 0;
+         0 kd 0 1];
+    initialState = [S0 I0 R0 D0];
+
+    % Run SIRD model with current parameters
+    sys_sir_base = ss(A, zeros(4,1), eye(4), zeros(4,1),1);
+    modeled = lsim(sys_sir_base, zeros(16,1),linspace(0,16-1,16),initialState);
+
+    % Convert to cumulative cases
+    modeledCumulativeCases = (1-S0)+cumsum(ki*(modeled(:,1)));
+
+    % Compare to real world data
+    infectionError = norm(modeledCumulativeCases - actualCases)
+    deathError = norm(modeled(:,4) - actualDeaths) * 10
+
+    % Report error
+    error = infectionError+deathError;
 end
