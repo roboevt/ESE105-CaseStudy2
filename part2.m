@@ -2,11 +2,16 @@ close all
 
 load("COVID_STL.mat")
 
+% Font parameters
+default_size = 18;
+title_size = 24;
+line_size = 3;
+
 % Plot entire dataset of covid cases
-plot(dates, cases_STL)
-title("Cumulative Covid Cases in St. Louis")
-xlabel("Date")
-ylabel("Cases")
+plot(dates, cases_STL, "LineWidth",line_size)
+title("Covid Cases in St. Louis", 'FontSize', title_size)
+xlabel("Date", 'FontSize', default_size)
+ylabel("Cases", 'FontSize', default_size)
 
 % Extract delta and omicron phases from data
 delta_idx =  (dates > datetime("2021-6-30") & dates < datetime("2021-10-26"));
@@ -26,17 +31,11 @@ delta_deaths_prop = delta_deaths/POP_STL;
 omicron_cases_prop = omicron_cases/POP_STL;
 omicron_deaths_prop = omicron_deaths/POP_STL;
 
-% Plot delta and omicron phases for reference
-figure
-plot(delta_dates, delta_cases)
-title("Delta Cases")
-xlabel("Date")
-ylabel("Cases")
-figure
-plot(omicron_dates, omicron_cases)
-title("Omicron Cases")
-xlabel("Date")
-ylabel("Cases")
+% Add delta and omicron phases to total graph
+hold on
+plot(delta_dates, delta_cases, "LineWidth",line_size+1)
+plot(omicron_dates, omicron_cases, "LineWidth",line_size+1)
+legend("", "Delta", "Omicron")
 
 % ---------- DELTA SIRD Model ----------
 
@@ -98,6 +97,7 @@ A = [1-ki 0 0 0;
 initialState = [S0 I0 R0 1-(S0+I0+R0)];
 
 deltaA = A;
+deltaInitialState = initialState;
 
 % Run the optimized model
 n = length(delta_dates);
@@ -108,20 +108,22 @@ deltaOptimalModel = lsim(delta_sys_sir_base,zeros(n,1),linspace(0,n-1,n),initial
 deltaModeldCumulativeCases = (1-S0)+cumsum(ki*deltaOptimalModel(:,1))';
 
 figure
-plot(delta_dates, deltaModeldCumulativeCases);
+plot(delta_dates, deltaModeldCumulativeCases, "LineWidth",line_size);
 hold on
-plot(delta_dates, delta_cases_prop);
-title("Delta Wave Modeled vs. Actual Covid Cases")
+plot(delta_dates, delta_cases_prop, "LineWidth",line_size);
+title("Delta Wave Modeled vs. Actual Covid Cases", "FontSize",title_size)
 legend("Model", "Actual")
-xlabel("Date")
-ylabel("Total Cases")
+xlabel("Date", "FontSize",default_size)
+ylabel("Total Cases","FontSize",default_size)
 
 figure
-plot(delta_dates, deltaOptimalModel(:,4));
+plot(delta_dates, deltaOptimalModel(:,4), "LineWidth",line_size);
 hold on
-plot(delta_dates, delta_deaths_prop);
+plot(delta_dates, delta_deaths_prop, "LineWidth",line_size);
 legend("Model", "Actual")
-title("Delta Wave Modeled vs. Actual Covid Deaths")
+title("Delta Wave Modeled vs. Actual Covid Deaths", "FontSize",title_size)
+xlabel("Date", "FontSize",default_size)
+ylabel("Total Cases","FontSize",default_size)
 
 % ---------- OMICRON SIRD Model ----------
 
@@ -145,11 +147,11 @@ lb = zeros(1,length(omicronStart)); % Lower bound
 ub = ones(1,length(omicronStart)); % Upper bound
 
 % 0 <= 1 - (S0 + I0 + R0) <= 1
-Aeq = [%0 0 0 -1 -1 -1 0; % -S0 - I0 - R0 <= 2
-       %0 0 0 1 1 1 0     %  S0 + I0 + R0 <= 1
+Aeq = [%0 0 0 -1 -1 -1; % -S0 - I0 - R0 <= 2
+       %0 0 0 1 1 1     %  S0 + I0 + R0 <= 1
        %0 1 1 0 0 0     %  kr + kd <= 1
        ];    
-beq = [%0
+beq = [%2
        %1
        %1
       ];
@@ -181,30 +183,32 @@ initialState = [S0 I0 R0 1-(S0+I0+R0)];
 % Run the optimized model
 n = length(omicron_dates);
 
-delta_sys_sir_base = ss(A,B,eye(4),zeros(4,1),1);
-omicronOptimalModel = lsim(delta_sys_sir_base,zeros(n,1),linspace(0,n-1,n),initialState);
+omicron_sys_sir_base = ss(A,B,eye(4),zeros(4,1),1);
+omicronOptimalModel = lsim(omicron_sys_sir_base,zeros(n,1),linspace(0,n-1,n),initialState);
 
 % Convert to form of real world data
 omicronModeldCumulativeCases = (1-S0)+cumsum(ki*omicronOptimalModel(:,1))';
 
 figure
-plot(omicron_dates, omicronModeldCumulativeCases);
+plot(omicron_dates, omicronModeldCumulativeCases, "LineWidth",line_size);
 hold on
-plot(omicron_dates, omicron_cases_prop);
-title("Omicron Wave Modeled vs. Actual Covid Cases")
+plot(omicron_dates, omicron_cases_prop, "LineWidth",line_size);
+title("Omicron Wave Modeled vs. Actual Covid Cases","FontSize", title_size)
 legend("Model", "Actual")
-xlabel("Date")
-ylabel("Total Cases")
+xlabel("Date", "FontSize",default_size)
+ylabel("Total Cases","FontSize",default_size)
 
 figure
-plot(omicron_dates, omicronOptimalModel(:,4));
+plot(omicron_dates, omicronOptimalModel(:,4), "LineWidth",line_size);
 hold on
-plot(omicron_dates, omicron_deaths_prop);
+plot(omicron_dates, omicron_deaths_prop, "LineWidth",line_size);
 legend("Model", "Actual")
-title("Omicron Wave Modeled vs. Actual Covid Deaths")
+title("Omicron Wave Modeled vs. Actual Covid Deaths","FontSize",title_size)
+xlabel("Date", "FontSize",default_size)
+ylabel("Total Cases","FontSize",default_size)
 
 
-
+% fmincon cost function
 function error = objective_function(input, actualCases, actualDeaths) 
     % Extract and name inputs
     ki = input(1);
