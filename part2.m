@@ -73,9 +73,6 @@ beq = [%2
 % Capture local variables and allow multiple lines in objective function
 deltaClosure = @(deltaState) objective_function(deltaState, delta_cases_prop, delta_deaths_prop);
 
-% Display fmincon progress
-% options = optimoptions('fmincon', 'Display', 'iter');
-
 % Perform the optimization
 delta_optimal = fmincon(deltaClosure, deltaStart, [], [], Aeq, beq, lb, []);
 

@@ -1,0 +1,109 @@
+close all
+
+load("mockdata2023.mat")
+
+% Font parameters
+default_size = 18;
+title_size = 24;
+line_size = 3;
+
+% Plot mockdata for reference
+plot(newInfections, "LineWidth",line_size)
+hold on
+plot(cumulativeDeaths, "LineWidth", line_size)
+title("Mock Data", 'FontSize', title_size)
+xlabel("Day", 'FontSize', default_size)
+ylabel("Fraction of Population", 'FontSize', default_size)
+legend("New Infections", "Cumulative Deaths")
+
+% ---------- SIRVD Optimization ----------
+
+% ----- Initial Guess -----
+
+% Rates
+ki = 0.002; % Infection rate
+kr = 0.9939; % Recovery rate
+kd = 0.0061; % Death rate
+kv = 0.1; % Vaccination rate
+kb = 0.001; % Breakthrough infection rate
+kp = 0.001; % ReInfection rate
+
+% Start
+S0 = 1; % Susceptible
+I0 = 0; % Infected
+R0 = 0; % Recovered
+V0 = 0; % Vaccinated
+D0 = 1 - S0 - I0 - R0 - V0; % Dead
+
+d = 100; % Vaccine rollout day
+
+initialGuess = [ki kr kd kv kb kp S0 I0 R0 V0 d];
+
+% ----- Constraints -----
+lb = zeros(1,length(deltaStart)); % Lower bound
+ub = ones(1,length(deltaStart)); % Upper bound
+
+Aeq = [];
+beq = [];
+
+% ----- Optimization -----
+
+% Capture local variables and allow multiple lines in objective function
+closure = @(state) objective_function(state, newInfections, cumulativeDeaths);
+
+% Perform the optimization
+optimal_result = fmincon(closure, initialGuess, [], [], Aeq, beq, [], []);
+
+
+
+% fmincon cost function
+function error = objective_function(input, actualNewInfections, actualCumulativeDeaths) 
+    % Extract and name inputs
+    ki = input(1);
+    kr = input(2);
+    kd = input(3);
+    kv = 0; % We begin the simulation without vaccines
+    kb = input(5);
+    kp = input(6);
+    S0 = input(7);
+    I0 = input(8);
+    R0 = input(9);
+    V0 = input(10);
+    D0 = 1-(S0+I0+R0+V0);
+    d  = input(11);
+    
+    % Create LTI
+    A = [1-ki-kv 0 kp 0 0;
+         ki 1-(kd+kr) 0 kb 0;
+         0 kr 1-(kp+kv) 0 0;
+         0 kd 0 0 1];
+    initialState = [S0 I0 R0 V0 D0];
+
+    % Run SIRD model with current parameters before vaccinations
+
+    sys_sir_base = ss(A, zeros(4,1), eye(4), zeros(4,1),1);
+    modeledBeforeVaccine = lsim(sys_sir_base, zeros(d,1),linspace(0,d-1,d),initialState);
+    
+    % Vaccine Rollout
+    kv = input(4);
+    A = [1-ki-kv 0 kp 0 0;
+         ki 1-(kd+kr) 0 kb 0;
+         0 kr 1-(kp+kv) 0 0;
+         0 kd 0 0 1];
+    d = 400 - d;
+
+    sys_sir_base = ss(A, zeros(4,1), eye(4), zeros(4,1),1);
+    modeledAfterVaccine = lsim(sys_sir_base, zeros(d,1),linspace(0,d-1,d),initialState);
+    
+    totalModel = [modeledBeforeVaccine; modeledAfterVaccine];
+
+    % Convert to cumulative cases
+    modeledCumulativeCases = (1-S0)+cumsum(ki*(modeled(:,1)));
+
+    % Compare to real world data
+    infectionError = norm(modeledCumulativeCases - actualCases);
+    deathError = norm(modeled(:,4) - actualDeaths);
+
+    % Report error
+    error = infectionError+deathError;
+end
