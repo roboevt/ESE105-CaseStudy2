@@ -55,6 +55,11 @@ plot(breakthroughInfections, "LineWidth",line_size)
 % plot(totalModel(:,4), "LineWidth",line_size) % Vaccinations, Breaks y axis legibility
 legend("Mock New Infections", "Mock Cumulative Deaths", "Modeled New Infections", "Modeled Cumulative Deaths", "Modeled Breakthrough Infections")
 
+vaxpop = totalModel(:,4);
+vaxbreak = breakthroughInfections;
+% Save results
+save("competition.mat", "vaxpop", "vaxbreak");
+
 function [newInfections, cumulativeDeaths, totalModel, breakthroughInfections] = simulate(input)
     % Extract and name inputs
     ki = input(1);
