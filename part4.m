@@ -11,7 +11,7 @@ line_size = 3;
 plot(newInfections, "LineWidth",line_size)
 hold on
 plot(cumulativeDeaths, "LineWidth", line_size)
-title("Mock vs. Modeled Data", 'FontSize', title_size)
+title("Mock vs. Modeled SIRVD Data", 'FontSize', title_size)
 xlabel("Day", 'FontSize', default_size)
 ylabel("Fraction of Population", 'FontSize', default_size)
 
@@ -20,47 +20,42 @@ ylabel("Fraction of Population", 'FontSize', default_size)
 % ----- Initial Guess -----
 
 % Rates
-ki = 0.002; % Infection rate
-kr = 0.9939; % Recovery rate
-kd = 0.061; % Death rate
-kv = 0.01; % Vaccination rate
-kb = 0.001; % Breakthrough infection rate
-kp = 0.001; % ReInfection rate
+ki = 0.0058; % Infection rate
+kr = 0.095; % Recovery rate
+kd = .0136; % Death rate
+kv = 0.04; % Vaccination rate
+kb = 0.00002; % Breakthrough infection rate
+kp = 0.001; % Reinfection rate
 
-% Start
+% Start point
 S0 = 1; % Susceptible
 I0 = 0; % Infected
 R0 = 0; % Recovered
 V0 = 0; % Vaccinated
 D0 = 1 - S0 - I0 - R0 - V0; % Dead
 
-d = 120; % Vaccine rollout day
+d = 122; % Vaccine rollout day
 
-initialGuess = [ki kr kd kv kb kp S0 I0 R0 V0 d];
+initialGuess = [ki kr kd kv kb kp S0 I0 R0 d];
 
 % ----- Constraints -----
 lb = zeros(1,length(initialGuess)); % Lower bound
 ub = ones(1,length(initialGuess)); % Upper bound
+ub(end) = 400;
+ub(9) = 0.1; % R0
 
-Aeq = [0 0 0 0 0 0 1 1 1 1 0];
-beq = [1];
+Aeq = [0 0 0 0 0 0 1 1 1 0]; % S0+I0+R0 <= 1
+beq = [1.000001];
 
-% ----- Optimization -----
-
-% Capture local variables and allow multiple lines in objective function
-closure = @(state) objective_function(state, newInfections, cumulativeDeaths);
-
-% Perform the optimization
-optimal_result = fmincon(closure, initialGuess, [], [], Aeq, beq, lb, []);
-
-% ---------- Optimization Results ----------
-[modeledNewInfections, modeledCumulativeDeaths] = simulate(optimal_result);
+[modeledNewInfections, modeledCumulativeDeaths, totalModel, breakthroughInfections] = simulate([ki kr kd kv kb kp S0 I0 R0 d]);
 
 plot(modeledNewInfections, "LineWidth",line_size)
 plot(modeledCumulativeDeaths, "LineWidth", line_size)
-legend("Mock New Infections", "Mock Cumulative Deaths", "Modeled New Infections", "Modeled Cumulative Deaths")
+plot(breakthroughInfections, "LineWidth",line_size)
+% plot(totalModel(:,4), "LineWidth",line_size) % Vaccinations, Breaks y axis legibility
+legend("Mock New Infections", "Mock Cumulative Deaths", "Modeled New Infections", "Modeled Cumulative Deaths", "Modeled Breakthrough Infections")
 
-function [newInfections, cumulativeDeaths] = simulate(input)
+function [newInfections, cumulativeDeaths, totalModel, breakthroughInfections] = simulate(input)
     % Extract and name inputs
     ki = input(1);
     kr = input(2);
@@ -71,9 +66,9 @@ function [newInfections, cumulativeDeaths] = simulate(input)
     S0 = input(7);
     I0 = input(8);
     R0 = input(9);
-    V0 = input(10);
+    V0 = 0;
     D0 = 1-(S0+I0+R0+V0);
-    d  = round(input(11));
+    d  = round(input(10));
 
     % Create LTI
     A = [1-ki-kv 0 kp 0 0;
@@ -97,33 +92,27 @@ function [newInfections, cumulativeDeaths] = simulate(input)
         0 kd 0 0 1];
     d = 400 - d;
     
-    initialState(1) = modeledBeforeVaccine(1,end);
-    initialState(2) = modeledBeforeVaccine(2,end);
-    initialState(3) = modeledBeforeVaccine(3,end);
-    initialState(4) = modeledBeforeVaccine(4,end);
-    initialState(5) = modeledBeforeVaccine(5,end);
+    % Initial state for phase 2 is end of phase 1
+    initialState(1) = modeledBeforeVaccine(end,1);
+    initialState(2) = modeledBeforeVaccine(end,2);
+    initialState(3) = modeledBeforeVaccine(end,3);
+    initialState(4) = modeledBeforeVaccine(end,4);
+    initialState(5) = modeledBeforeVaccine(end,5);
     
     sys_sir_base = ss(A, zeros(5,1), eye(5), zeros(5,1),1);
     modeledAfterVaccine = lsim(sys_sir_base, zeros(d,1),linspace(0,d-1,d),initialState);
     
     totalModel = [modeledBeforeVaccine; modeledAfterVaccine];
     
-    % Convert results to match goal
-    modeledNewInfections = totalModel(:,1) * ki;
-    modeledBreakthroughInfections = totalModel(:,4) * kb;
-    newInfections = modeledNewInfections + modeledBreakthroughInfections;
-    
+    % Convert and return results
+    modeledNewInfections = totalModel(:,1) * ki; % Susceptible -> infected
+    breakthroughInfections = totalModel(:,4) * kb; % Vaccinated -> infected
+    modeledNewVaccinations = [zeros(400-d,1); modeledAfterVaccine(:,1) * kv + modeledAfterVaccine(:,3) * kv];
+    newInfections = modeledNewInfections + breakthroughInfections + modeledNewVaccinations;
     cumulativeDeaths = totalModel(:,5);
-end
 
-% fmincon cost function
-function error = objective_function(input, actualNewInfections, actualCumulativeDeaths)
-    [totalModelNewInfections, modeledCumulativeDeaths] = simulate(input);
-    
-    % Compare to goal data
-    infectionError = norm(totalModelNewInfections - actualNewInfections);
-    deathError = norm(modeledCumulativeDeaths - actualCumulativeDeaths);
-    
-    % Report error
-    error = infectionError+deathError;
+    % Assume people are infected for 2 weeks after a breakthrough infection
+    window = 14; % 2 weeks
+    block = ones(1,window);
+    breakthroughInfections = conv(breakthroughInfections, block, "same"); % 14 running sum
 end
